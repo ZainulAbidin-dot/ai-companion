@@ -1,8 +1,7 @@
 import dotenv from 'dotenv';
 import { currentUser } from '@clerk/nextjs/server';
 import { LangChainStream, StreamingTextResponse } from 'ai';
-import { CallbackManager } from 'langchain/callbacks';
-import { Replicate } from 'langchain/llms/replicate';
+import Replicate from 'replicate';
 import { NextResponse } from 'next/server';
 
 import { MemoryManager } from '@/lib/memory';
@@ -77,63 +76,59 @@ export async function POST(
 
     const { handlers } = LangChainStream();
     const model = new Replicate({
-      model:
-        'a16z-infra/llama-2-13b-chat:df7690f1994d94e96ad9d568eac121aecf50684a0b0963b25a41cc40061269e5',
-      input: {
-        max_length: 2048,
-      },
-      apiKey: process.env.REPLICATE_API_TOKEN,
-      callbackManager: CallbackManager.fromHandlers(handlers),
+        auth: process.env.REPLICATE_API_TOKEN
     });
 
-    model.verbose = true;
-    const resp = String(
-      await model
-        .call(
-          `
-          ONLY generate plain sentences without prefix of who is speaking. DO NOT use ${companion.name}: prefix. 
-  
-          ${companion.instructions}
-  
-          Below are relevant details about ${companion.name}'s past and the conversation you are in.
-          ${relevantHistory}
-  
-  
-          ${recentChatHistory}\n${companion.name}:`
-        )
-        .catch(console.error)
-    );
-    const cleaned = resp.replaceAll(',', '');
-    const chunks = cleaned.split('\n');
-    const response = chunks[0];
+    const prediction = await model
+        .run(
+                "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",            {
+                input: {
+                    prompt: `ONLY generate plain sentences without prefix of who is speaking. DO NOT use ${companion.name}: prefix.
+                    ${companion.instructions}
+                    Below are relevant details about ${companion.name}'s past and the conversation you are in.
+                    ${relevantHistory}
+                    ${recentChatHistory}\n${companion.name}:`      
+                }
+            }
+        );
 
-    await memoryManager.writeToHistory('' + response.trim(), companionKey);
-    var Readable = require('stream').Readable;
+    console.log("MODEL OUTPUT: ", prediction)
+    const resp = prediction;
+    
+    // const cleaned = resp.replaceAll(',', '');
+    // const chunks = cleaned.split('\n');
+    // const response = chunks[0];
+    const response = resp;
 
-    let s = new Readable();
-    s.push(response);
-    s.push(null);
-    if (response !== undefined && response.length > 1) {
-      memoryManager.writeToHistory('' + response.trim(), companionKey);
+    await memoryManager.writeToHistory('' + response, companionKey);
+    // var Readable = require('stream').Readable;
 
-      await prismadb.companion.update({
-        where: {
-          id: params.chatId,
-        },
-        data: {
-          messages: {
-            create: {
-              content: response.trim(),
-              role: 'system',
-              userId: user.id,
-            },
-          },
-        },
-      });
+    // let s = new Readable();
+    // s.push(response);
+    // s.push(null);
+    if (response !== undefined && response) {
+      memoryManager.writeToHistory('' + response, companionKey);
+
+    //   await prismadb.companion.update({
+    //     where: {
+    //       id: params.chatId,
+    //     },
+    //     data: {
+    //       messages: {
+    //         create: {
+    //           content: response,
+    //           role: 'system',
+    //           userId: user.id,
+    //         },
+    //       },
+    //     },
+    //   });
     }
 
-    return new StreamingTextResponse(s);
+    console.log(response)
+    return new NextResponse("HI");
   } catch (error) {
+    console.log(error)
     return new NextResponse('Internal Error', { status: 500 });
   }
 }
