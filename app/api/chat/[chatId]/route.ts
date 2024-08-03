@@ -1,9 +1,11 @@
 import dotenv from 'dotenv';
 import { currentUser } from '@clerk/nextjs/server';
-import { LangChainStream, StreamingTextResponse } from 'ai';
-import Replicate from 'replicate';
+import { createStreamDataTransformer, LangChainStream, StreamingTextResponse } from 'ai';
+import { ChatOpenAI } from '@langchain/openai'
+import { HttpResponseOutputParser } from "langchain/output_parsers";
+// import { Replicate } from 'langchain/llms/replicate';
 import { NextResponse } from 'next/server';
-
+import { PromptTemplate } from '@langchain/core/prompts'
 import { MemoryManager } from '@/lib/memory';
 import prismadb from '@/lib/prismadb';
 import { rateLimit } from '@/lib/rate-limit';
@@ -75,39 +77,43 @@ export async function POST(
     }
 
     const { handlers } = LangChainStream();
-    const model = new Replicate({
-        auth: process.env.REPLICATE_API_TOKEN
+
+    const TEMPLATE = `
+                      ONLY generate plain sentences without prefix of who is speaking. DO NOT use ${companion.name}: prefix. 
+                      ${companion.instructions}
+                      Below are relevant details about ${companion.name}'s past and the conversation you are in.
+                      ${relevantHistory}
+                      ${recentChatHistory}\n${companion.name}:
+                    `;
+    const modifiedPrompt = PromptTemplate.fromTemplate(TEMPLATE)
+
+    const model = new ChatOpenAI({
+        apiKey: process.env.OPENAI_API_KEY!,
+        model: 'gpt-3.5-turbo',
+        temperature: 0.8,
+        verbose: true,
     });
 
-    const prediction = await model
-        .run(
-                "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",            {
-                input: {
-                    prompt: `ONLY generate plain sentences without prefix of who is speaking. DO NOT use ${companion.name}: prefix.
-                    ${companion.instructions}
-                    Below are relevant details about ${companion.name}'s past and the conversation you are in.
-                    ${relevantHistory}
-                    ${recentChatHistory}\n${companion.name}:`      
-                }
-            }
-        );
+    const parser = new HttpResponseOutputParser();
 
-    console.log("MODEL OUTPUT: ", prediction)
-    const resp = prediction;
-    
-    // const cleaned = resp.replaceAll(',', '');
-    // const chunks = cleaned.split('\n');
-    // const response = chunks[0];
-    const response = resp;
+    const chain = modifiedPrompt.pipe(model.bind({ stop: ["?"] })).pipe(parser);
+    const stream = await chain.stream({ 
+        chat_history: recentChatHistory,
+        input: prompt
+     });
 
-    await memoryManager.writeToHistory('' + response, companionKey);
+    const response = new StreamingTextResponse(stream.pipeThrough(createStreamDataTransformer()),)
+
+    console.log(response)
+
+    // await memoryManager.writeToHistory('' + response, companionKey);
     // var Readable = require('stream').Readable;
 
     // let s = new Readable();
     // s.push(response);
     // s.push(null);
-    if (response !== undefined && response) {
-      memoryManager.writeToHistory('' + response, companionKey);
+    // if (response !== undefined && response) {
+    //   memoryManager.writeToHistory('' + response, companionKey);
 
     //   await prismadb.companion.update({
     //     where: {
@@ -116,19 +122,17 @@ export async function POST(
     //     data: {
     //       messages: {
     //         create: {
-    //           content: response,
+    //           content: response != null ? response.body : "sd",
     //           role: 'system',
     //           userId: user.id,
     //         },
     //       },
     //     },
     //   });
-    }
+    // }
 
-    console.log(response)
-    return new NextResponse("HI");
+    return response;
   } catch (error) {
-    console.log(error)
     return new NextResponse('Internal Error', { status: 500 });
   }
 }
