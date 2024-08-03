@@ -1,31 +1,32 @@
-'use client';
+"use client";
 
-import { useUser } from '@clerk/nextjs';
-import { Companion, Message } from '@prisma/client';
-import axios from 'axios';
+import { useUser } from "@clerk/nextjs";
+import { Companion } from "@prisma/client";
+import axios from "axios";
 import {
   ChevronLeft,
   Edit,
   MessageSquare,
   MoreVertical,
   Trash,
-} from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { FC } from 'react';
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { FC } from "react";
 
-import { BotAvatar } from '@/components/bot-avatar';
-import { Button } from '@/components/ui/button';
+import { BotAvatar } from "@/components/bot-avatar";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { useToast } from '@/components/ui/use-toast';
+} from "@/components/ui/dropdown-menu";
+import { useToast } from "@/components/ui/use-toast";
+import { type Message } from "ai/react";
 
 interface ChatHeaderProps {
   companion: Companion & {
-    messages: Message[];
+    messages: Pick<Message, "id" | "role" | "content">[];
     _count: {
       messages: number;
     };
@@ -41,18 +42,18 @@ const ChatHeader: FC<ChatHeaderProps> = ({ companion }) => {
     try {
       await axios.delete(`/api/companion/${companion.id}`);
       toast({
-        description: 'Success',
+        description: "Success",
       });
       router.refresh();
     } catch (error) {
       toast({
-        description: 'Something went wrong',
-        variant: 'destructive',
+        description: "Something went wrong",
+        variant: "destructive",
       });
     }
   };
   return (
-    <div className="flex items-center justify-between w-full pb-4 border-b border-primary/10">
+    <div className="flex w-full items-center justify-between border-b border-primary/10 pb-4">
       <div className="flex items-center gap-x-2">
         <Button
           type="button"
@@ -60,14 +61,14 @@ const ChatHeader: FC<ChatHeaderProps> = ({ companion }) => {
           size="icon"
           onClick={() => router.back()}
         >
-          <ChevronLeft className="w-8 h-8" />
+          <ChevronLeft className="h-8 w-8" />
         </Button>
         <BotAvatar src={companion.src} />
         <div className="flex flex-col gap-y-1">
           <div className="flex items-center gap-x-2">
             <p className="font-bold">{companion.name}</p>
             <div className="flex items-center text-xs text-muted-foreground">
-              <MessageSquare className="w-3 h-3 mr-1" />
+              <MessageSquare className="mr-1 h-3 w-3" />
               {companion._count.messages}
             </div>
           </div>
@@ -87,11 +88,11 @@ const ChatHeader: FC<ChatHeaderProps> = ({ companion }) => {
             <DropdownMenuItem
               onClick={() => router.push(`/companion/${companion.id}`)}
             >
-              <Edit className="w-4 h-4 mr-2" />
+              <Edit className="mr-2 h-4 w-4" />
               Edit
             </DropdownMenuItem>
             <DropdownMenuItem onClick={onDelete}>
-              <Trash className="w-4 h-4 mr-2" />
+              <Trash className="mr-2 h-4 w-4" />
               Delete
             </DropdownMenuItem>
           </DropdownMenuContent>

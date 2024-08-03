@@ -1,8 +1,8 @@
-import { auth, redirectToSignIn } from '@clerk/nextjs/server';
-import { redirect } from 'next/navigation';
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
 
-import prismadb from '@/lib/prismadb';
-import { ChatClient } from './components/client';
+import prismadb from "@/lib/prismadb";
+import { ChatClient } from "./components/client";
 
 interface ChatIdPageProps {
   params: {
@@ -11,7 +11,7 @@ interface ChatIdPageProps {
 }
 
 const ChatIdPage = async ({ params: { chatId } }: ChatIdPageProps) => {
-  const { userId } = auth();
+  const { userId, redirectToSignIn } = auth();
   if (!userId) {
     return redirectToSignIn();
   }
@@ -23,10 +23,15 @@ const ChatIdPage = async ({ params: { chatId } }: ChatIdPageProps) => {
     include: {
       messages: {
         orderBy: {
-          createdAt: 'asc',
+          createdAt: "asc",
         },
         where: {
           userId,
+        },
+        select: {
+          id: true,
+          role: true,
+          content: true,
         },
       },
       _count: {
@@ -38,7 +43,7 @@ const ChatIdPage = async ({ params: { chatId } }: ChatIdPageProps) => {
   });
 
   if (!companion) {
-    return redirect('/');
+    return redirect("/");
   }
 
   return <ChatClient companion={companion} />;
