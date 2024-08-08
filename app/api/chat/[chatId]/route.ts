@@ -1,138 +1,132 @@
-import dotenv from 'dotenv';
-import { currentUser } from '@clerk/nextjs/server';
-import { createStreamDataTransformer, LangChainStream, StreamingTextResponse } from 'ai';
-import { ChatOpenAI } from '@langchain/openai'
-import { HttpResponseOutputParser } from "langchain/output_parsers";
-// import { Replicate } from 'langchain/llms/replicate';
-import { NextResponse } from 'next/server';
-import { PromptTemplate } from '@langchain/core/prompts'
-import { MemoryManager } from '@/lib/memory';
-import prismadb from '@/lib/prismadb';
-import { rateLimit } from '@/lib/rate-limit';
+import dotenv from "dotenv";
+import { currentUser } from "@clerk/nextjs/server";
+import { LangChainAdapter } from "ai";
+import { ChatOpenAI } from "@langchain/openai";
+import { NextResponse } from "next/server";
+import { MemoryManager } from "@/lib/memory";
+import prismadb from "@/lib/prismadb";
+import { rateLimit } from "@/lib/rate-limit";
 
 dotenv.config({ path: `.env` });
 
 export async function POST(
   req: Request,
-  { params }: { params: { chatId: string } }
+  { params }: { params: { chatId: string } },
 ) {
   try {
-    const { prompt } = await req.json();
+    const body = await req.json();
+    // console.log("body", body);
+    // const { prompt } = body;
+    const prompt = body.messages[body.messages.length - 1].content;
     const user = await currentUser();
     if (!user || !user.firstName || !user.id) {
-      return new NextResponse('Unauthorized', { status: 401 });
+      return new NextResponse("Unauthorized", { status: 401 });
     }
 
-    const identifier = req.url + '-' + user.id;
+    const identifier = req.url + "-" + user.id;
     const { success } = await rateLimit(identifier);
     if (!success) {
-      return new NextResponse('Rate limit exceeded', { status: 429 });
+      return new NextResponse("Rate limit exceeded", { status: 429 });
     }
 
-    const companion = await prismadb.companion.update({
-      where: {
-        id: params.chatId,
-      },
-      data: {
-        messages: {
-          create: {
-            content: prompt,
-            role: 'user',
-            userId: user.id,
-          },
-        },
-      },
+    const companion = await prismadb.companion.findUnique({
+      where: { id: params.chatId },
     });
 
     if (!companion) {
-      return new NextResponse('Companion not found', { status: 404 });
+      return new NextResponse("Companion not found", { status: 404 });
     }
 
     const name = companion.id;
-    const companion_file_name = name + '.txt';
+    const companion_file_name = name + ".txt";
 
     const companionKey = {
       companionName: name!,
       userId: user.id,
-      modelName: 'llama2-13b',
+      modelName: "llama2-13b",
     };
     const memoryManager = await MemoryManager.getInstance();
-    const records = await memoryManager.readLatestHistory(companionKey);
-    if (records.length === 0) {
-      await memoryManager.seedChatHistory(companion.seed, '\n\n', companionKey);
-    }
-    await memoryManager.writeToHistory('User: ' + prompt + '\n', companionKey);
 
-    const recentChatHistory = await memoryManager.readLatestHistory(
-      companionKey
-    );
+    const records = await memoryManager.readLatestHistory(companionKey);
+
+    if (records.length === 0) {
+      await memoryManager.seedChatHistory(companion.seed, "\n\n", companionKey);
+    }
+    await memoryManager.writeToHistory("User: " + prompt + "\n", companionKey);
+
+    const recentChatHistory =
+      await memoryManager.readLatestHistory(companionKey);
     const similarDocs = await memoryManager.vectorSearch(
       recentChatHistory,
-      companion_file_name
+      companion_file_name,
     );
 
-    let relevantHistory = '';
+    let relevantHistory = "";
     if (!!similarDocs && similarDocs.length !== 0) {
-      relevantHistory = similarDocs.map((doc) => doc.pageContent).join('\n');
+      relevantHistory = similarDocs.map((doc) => doc.pageContent).join("\n");
     }
 
-    const { handlers } = LangChainStream();
-
-    const TEMPLATE = `
+    const modifiedPrompt = `
                       ONLY generate plain sentences without prefix of who is speaking. DO NOT use ${companion.name}: prefix. 
                       ${companion.instructions}
                       Below are relevant details about ${companion.name}'s past and the conversation you are in.
                       ${relevantHistory}
                       ${recentChatHistory}\n${companion.name}:
                     `;
-    const modifiedPrompt = PromptTemplate.fromTemplate(TEMPLATE)
 
     const model = new ChatOpenAI({
-        apiKey: process.env.OPENAI_API_KEY!,
-        model: 'gpt-3.5-turbo',
-        temperature: 0.8,
-        verbose: true,
+      apiKey: process.env.OPENAI_API_KEY!,
+      model: "gpt-4o",
+      temperature: 0.8,
+      // verbose: true,
     });
 
-    const parser = new HttpResponseOutputParser();
+    const stream = await model.stream(modifiedPrompt, {});
 
-    const chain = modifiedPrompt.pipe(model.bind({ stop: ["?"] })).pipe(parser);
-    const stream = await chain.stream({ 
-        chat_history: recentChatHistory,
-        input: prompt
-     });
-
-    const response = new StreamingTextResponse(stream.pipeThrough(createStreamDataTransformer()),)
-
-    console.log(response)
-
-    // await memoryManager.writeToHistory('' + response, companionKey);
-    // var Readable = require('stream').Readable;
-
-    // let s = new Readable();
-    // s.push(response);
-    // s.push(null);
-    // if (response !== undefined && response) {
-    //   memoryManager.writeToHistory('' + response, companionKey);
-
-    //   await prismadb.companion.update({
-    //     where: {
-    //       id: params.chatId,
-    //     },
-    //     data: {
-    //       messages: {
-    //         create: {
-    //           content: response != null ? response.body : "sd",
-    //           role: 'system',
-    //           userId: user.id,
-    //         },
-    //       },
-    //     },
-    //   });
-    // }
-
-    return response;
+    return LangChainAdapter.toDataStreamResponse(stream, {
+      callbacks: {
+        onStart() {
+          //! TODO: Remove this
+          console.log("Saving prompt", prompt);
+          prismadb.message
+            .create({
+              data: {
+                role: "user",
+                content: prompt,
+                companionId: companion.id,
+                userId: user.id,
+              },
+            })
+            .then((message) => {
+              console.log("Prompt Message", message);
+            })
+            .catch((error) => {
+              console.log("Prompt Error", error);
+            });
+        },
+        onFinal(completion) {
+          //! TODO: Remove this
+          console.log("Saving completion", completion);
+          prismadb.message
+            .create({
+              data: {
+                role: "system",
+                content: completion,
+                companionId: companion.id,
+                userId: user.id,
+              },
+            })
+            .then((message) => {
+              console.log("Completion Message", message);
+            })
+            .catch((error) => {
+              console.log("Completion Error", error);
+            });
+        },
+      },
+    });
   } catch (error) {
-    return new NextResponse('Internal Error', { status: 500 });
+    console.log(error instanceof Error ? error.message : error);
+    return new NextResponse("Internal Error", { status: 500 });
   }
 }
