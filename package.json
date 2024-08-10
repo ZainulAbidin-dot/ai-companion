@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@clerk/nextjs": "^5.2.2",
@@ -24,10 +25,12 @@
     "@radix-ui/react-toast": "^1.2.1",
     "@upstash/ratelimit": "^2.0.1",
     "@upstash/redis": "^1.33.0",
+    "add": "^2.0.6",
     "ai": "^3.3.0",
     "axios": "^1.7.2",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
+    "dialog": "^0.3.1",
     "dotenv": "^16.4.5",
     "langchain": "^0.2.11",
     "lucide-react": "^0.401.0",
@@ -42,9 +45,12 @@
     "react-hook-form": "^7.52.1",
     "react-spinners": "^0.14.1",
     "replicate": "^0.32.0",
+    "shadcn-ui": "^0.8.0",
+    "stripe": "^16.7.0",
     "tailwind-merge": "^2.4.0",
     "tailwindcss-animate": "^1.0.7",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "zustand": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^20",
